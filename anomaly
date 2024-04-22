@@ -1,0 +1,214 @@
+import cv2
+import numpy as np
+import os
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, AveragePooling3D, Flatten, Dense
+from tensorflow.keras.preprocessing import image
+
+def preprocess_video(video_path, output_folder):
+    # Create the output folder if it doesn't exist
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+
+    # Get video information
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Loop through each frame
+    for frame_num in range(total_frames):
+        # Read the frame
+        ret, frame = cap.read()
+
+        if not ret:
+            break
+
+        # Apply Gaussian blur for noise reduction
+        blurred_frame = cv2.GaussianBlur(frame, (5, 5), 0)
+
+        # Convert the frame to grayscale
+        gray_frame = cv2.cvtColor(blurred_frame, cv2.COLOR_BGR2GRAY)
+
+        # Resize the frame to your desired dimensions (optional)
+        # resized_frame = cv2.resize(gray_frame, (new_width, new_height))
+
+        # Normalize pixel values to be between 0 and 1
+        normalized_frame = gray_frame / 255.0
+
+        # Save the frame as an image in the output folder
+        output_path = os.path.join(output_folder, f"frame_{frame_num}.jpg")
+        cv2.imwrite(output_path, (normalized_frame * 255).astype(np.uint8))
+
+    # Release the video capture object
+    cap.release()
+
+def calculate_optical_flow(video_path, output_folder):
+    cap = cv2.VideoCapture(video_path)
+    ret, frame1 = cap.read()
+    prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+
+    # Create the output folder if it doesn't exist
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    frame_num = 0
+    while True:
+        ret, frame2 = cap.read()
+        if not ret:
+            break
+
+        # Apply Gaussian blur for noise reduction
+        blurred_frame2 = cv2.GaussianBlur(frame2, (5, 5), 0)
+        next_frame = cv2.cvtColor(blurred_frame2, cv2.COLOR_BGR2GRAY)
+
+        flow = cv2.calcOpticalFlowFarneback(
+            prvs, next_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0
+        )
+
+        # Save optical flow as an image in the output folder
+        output_path = os.path.join(output_folder, f"flow_{frame_num}.jpg")
+        save_optical_flow_image(flow, output_path)
+
+        prvs = next_frame
+        frame_num += 1
+
+    cap.release()
+
+def save_optical_flow_image(flow, output_path):
+    mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+    hsv = np.zeros((flow.shape[0], flow.shape[1], 3), dtype=np.uint8)
+    hsv[..., 1] = 255
+    hsv[..., 0] = ang * 180 / np.pi / 2
+    hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    cv2.imwrite(output_path, rgb)
+
+def extract_spatiotemporal_features(video_folder):
+    # Load pre-trained I3D model
+    base_model = InceptionV3(weights='imagenet', include_top=False)
+    base_model.trainable = False  # Freeze pre-trained layers
+
+    # Create the spatiotemporal feature extraction model
+    input_layer = Input(shape=(None, 224, 224, 3))  # Input shape for video frames
+    x = AveragePooling3D(pool_size=(2, 2, 2))(input_layer)
+    x = base_model(x, training=False)
+    x = AveragePooling3D(pool_size=(2, 2, 2))(x)
+    x = Flatten()(x)
+    output_layer = Dense(512, activation='relu')(x)  # Adjust output layer as needed
+
+    model = Model(inputs=input_layer, outputs=output_layer)
+
+    # Extract spatiotemporal features for each video
+    for video_file in os.listdir(video_folder):
+        video_path = os.path.join(video_folder, video_file)
+        frames = load_frames(video_path)
+        features = model.predict(np.expand_dims(frames, axis=0))
+        # Perform analysis on extracted features (e.g., anomaly detection)
+
+def load_frames(video_path):
+    frames = []
+    cap = cv2.VideoCapture(video_path)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = cv2.resize(frame, (224, 224))  # Resize frames to match input shape
+        frames.append(frame)
+
+    cap.release()
+    return np.array(frames)
+
+# Example usage:
+dataset_folder = "D:/PBL2 project/Dataset"
+output_folder_optical_flow = os.path.join(dataset_folder, "Optical_Flow_Frames")
+
+# Process normal videos
+normal_video_folder = os.path.join(dataset_folder, "Normal")
+for video_file in os.listdir(normal_video_folder):
+    video_path = os.path.join(normal_video_folder, video_file)
+    output_subfolder = os.path.join(output_folder_optical_flow, os.path.splitext(video_file)[0])
+    preprocess_video(video_path, output_subfolder)
+    calculate_optical_flow(video_path, output_subfolder)
+
+# Process anomaly videos
+anomaly_video_folder = os.path.join(dataset_folder, "Anomaly")
+for video_file in os.listdir(anomaly_video_folder):
+    video_path = os.path.join(anomaly_video_folder, video_file)
+    output_subfolder = os.path.join(output_folder_optical_flow, os.path.splitext(video_file)[0])
+    preprocess_video(video_path, output_subfolder)
+    calculate_optical_flow(video_path, output_subfolder)
+
+# Extract spatiotemporal features and perform analysis
+extract_spatiotemporal_features(output_folder_optical_flow)
+
+import cv2
+import numpy as np
+import os
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, AveragePooling3D, Flatten, Dense
+from tensorflow.keras.preprocessing import image
+
+def preprocess_video(video_path, output_folder):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    for frame_num in range(total_frames):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Resize frames to a specific resolution (e.g., 128x128)
+        resized_frame = cv2.resize(frame, (128, 128))
+
+        # Convert frames to grayscale
+        gray_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2GRAY)
+
+        # Apply additional noise reduction techniques (e.g., median blur)
+        denoised_frame = cv2.medianBlur(gray_frame, 5)
+
+        # Introduce data augmentation (e.g., random rotation)
+        angle = np.random.randint(-10, 10)
+        rotated_frame = cv2.warpAffine(denoised_frame, cv2.getRotationMatrix2D((64, 64), angle, 1.0), (128, 128))
+
+        # Normalize pixel values to be between 0 and 1
+        normalized_frame = rotated_frame / 255.0
+
+        # Save the preprocessed frame
+        output_path = os.path.join(output_folder, f"frame_{frame_num}.jpg")
+        cv2.imwrite(output_path, (normalized_frame * 255).astype(np.uint8))
+
+    cap.release()
+
+# ... (Previous code remains unchanged)
+
+# Example usage:
+dataset_folder = "D:/PBL2 project/Dataset"
+output_folder_optical_flow = os.path.join(dataset_folder, "Optical_Flow_Frames")
+
+# Process normal videos
+normal_video_folder = os.path.join(dataset_folder, "Normal")
+for video_file in os.listdir(normal_video_folder):
+    video_path = os.path.join(normal_video_folder, video_file)
+    output_subfolder = os.path.join(output_folder_optical_flow, os.path.splitext(video_file)[0])
+    preprocess_video(video_path, output_subfolder)
+    calculate_optical_flow(video_path, output_subfolder)
+
+# Process anomaly videos
+anomaly_video_folder = os.path.join(dataset_folder, "Anomaly")
+for video_file in os.listdir(anomaly_video_folder):
+    video_path = os.path.join(anomaly_video_folder, video_file)
+    output_subfolder = os.path.join(output_folder_optical_flow, os.path.splitext(video_file)[0])
+    preprocess_video(video_path, output_subfolder)
+    calculate_optical_flow(video_path, output_subfolder)
+
+# Extract spatiotemporal features and perform analysis
+extract_spatiotemporal_features(output_folder_optical_flow)
